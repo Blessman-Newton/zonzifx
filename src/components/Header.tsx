@@ -33,10 +33,13 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
             <a href="#testimonials" className="text-[#cfc4c5] hover:text-white transition-colors">
               About
             </a>
+            <a onClick={() => onNavigate("vault")} className="text-[#cfc4c5] hover:text-[#e9c349] transition-colors cursor-pointer font-bold">
+              Lectures
+            </a>
           </div>
         )}
 
-        {(currentPage === "enroll" || currentPage === "admin") && (
+        {(currentPage === "enroll" || currentPage === "admin" || currentPage === "vault") && (
           <button
             onClick={() => onNavigate("landing")}
             className="flex items-center gap-2 text-sm font-medium text-[#cfc4c5] hover:text-white transition-colors cursor-pointer group"

@@ -24,6 +24,7 @@ interface EnrollPageProps {
   webhookUrl: string;
   applications: AcademyApplication[];
   setApplications: (apps: AcademyApplication[]) => void;
+  paymentGatewayEnabled: boolean;
 }
 
 export default function EnrollPage({ 
@@ -33,7 +34,8 @@ export default function EnrollPage({
   programs,
   webhookUrl,
   applications,
-  setApplications
+  setApplications,
+  paymentGatewayEnabled
 }: EnrollPageProps) {
   // Local state for enrollment form
   const [fullName, setFullName] = useState("");
@@ -42,6 +44,7 @@ export default function EnrollPage({
   const [programId, setProgramId] = useState(selectedProgramId || "professional");
   const [experience, setExperience] = useState("Intermediate");
   const [capital, setCapital] = useState("$10k - $100k");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // Field focus states for visual feedback
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -89,8 +92,20 @@ export default function EnrollPage({
         status: "Pending"
       };
 
-      // Store in App state
-      setApplications([newApp, ...applications]);
+      // Store in App state and database
+      fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newApp)
+      })
+      .then(res => res.json())
+      .then(savedApp => {
+        setApplications([savedApp, ...applications]);
+      })
+      .catch(err => {
+        console.error("Failed to sync application to database:", err);
+        setApplications([newApp, ...applications]);
+      });
 
       // Route to external Forms/webhook URL if configured
       if (webhookUrl) {
@@ -118,12 +133,16 @@ export default function EnrollPage({
         });
       }
 
-      onSubmitEnrollment({
-        fullName,
-        email,
-        phone,
-        programId
-      });
+      if (paymentGatewayEnabled) {
+        onSubmitEnrollment({
+          fullName,
+          email,
+          phone,
+          programId
+        });
+      } else {
+        setShowSuccessModal(true);
+      }
     }
   };
 
@@ -381,10 +400,10 @@ export default function EnrollPage({
                     </div>
                     <div>
                       <h4 className="font-headline font-bold text-white text-sm mb-1">
-                        Discord Server Keys
+                        Telegram Community Access
                       </h4>
                       <p className="text-[#cfc4c5] text-xs leading-relaxed">
-                        Access real-time institutional flow signals and collaborative alerts inside our private 24/7 terminal.
+                        Access real-time institutional flow signals, updates, and trade coordination chat inside our private channel.
                       </p>
                     </div>
                   </div>
@@ -396,10 +415,10 @@ export default function EnrollPage({
                     </div>
                     <div>
                       <h4 className="font-headline font-bold text-white text-sm mb-1">
-                        Weekly Live Webinars
+                        Bi-weekly Live Webinars
                       </h4>
                       <p className="text-[#cfc4c5] text-xs leading-relaxed">
-                        Interactive session reviews, London/NY opens breakdowns, and live Q&A with senior hedge fund advisors.
+                        Interactive session reviews, London/NY opens breakdowns, and live Q&A sessions held every two weeks.
                       </p>
                     </div>
                   </div>
@@ -411,7 +430,7 @@ export default function EnrollPage({
                     </div>
                     <div>
                       <h4 className="font-headline font-bold text-white text-sm mb-1">
-                        PDF Resource Playbooks
+                        PDF Resource Playbook
                       </h4>
                       <p className="text-[#cfc4c5] text-xs leading-relaxed">
                         Exclusive order flow templates, dynamic risk tables, and highly specific execution checklists.
@@ -436,7 +455,7 @@ export default function EnrollPage({
                     </div>
                   </div>
                   <span className="font-sans text-xs text-[#cfc4c5]">
-                    Join <span className="text-white font-bold">4,200+ traders</span> globally
+                    Join <span className="text-white font-bold">100+ traders</span> globally
                   </span>
                 </div>
 
@@ -455,6 +474,42 @@ export default function EnrollPage({
 
         </div>
       </main>
+
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#131313] border border-white/10 rounded-xl p-8 space-y-6 text-center relative shadow-2xl">
+            <div className="w-16 h-16 bg-[#e9c349]/10 text-[#e9c349] rounded-full flex items-center justify-center mx-auto border border-[#e9c349]/20">
+              <ShieldCheck className="w-8 h-8" />
+            </div>
+            
+            <div className="space-y-2">
+              <span className="font-mono text-[9px] text-[#e9c349] tracking-widest uppercase block font-bold">
+                onboarding coordinate registry
+              </span>
+              <h2 className="font-headline text-2xl font-bold text-white leading-tight">
+                Enrollment Application Logged
+              </h2>
+              <p className="text-xs text-[#cfc4c5] font-sans leading-relaxed">
+                Your profile coordinates have been securely saved to the platform database. 
+                A ZonziFX senior mentor will contact you directly via phone or email within the next 2 hours 
+                to verify your credentials, coordinate tuition details, and issue your unique watchroom access key code.
+              </p>
+            </div>
+
+            <div className="pt-4 font-mono">
+              <button
+                onClick={() => {
+                  setShowSuccessModal(false);
+                  onNavigate("landing");
+                }}
+                className="w-full gold-gradient text-black font-headline text-xs font-bold py-3.5 uppercase tracking-wider hover:opacity-90 active:scale-95 transition-all shadow-lg cursor-pointer"
+              >
+                Return to Homepage
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

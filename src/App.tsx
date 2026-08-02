@@ -11,8 +11,9 @@ import EnrollPage from "./components/EnrollPage";
 import CheckoutPage from "./components/CheckoutPage";
 import SuccessPage from "./components/SuccessPage";
 import AdminPortal from "./components/AdminPortal";
-import { EnrollmentData, Program, Testimonial, TradeResult, AcademyApplication } from "./types";
-import { PROGRAMS, TESTIMONIALS, TRADE_RESULTS } from "./data";
+import VideoVault from "./components/VideoVault";
+import StudentLogin from "./components/StudentLogin";
+import { EnrollmentData, Program, Testimonial, TradeResult, AcademyApplication, VideoItem } from "./types";
 
 interface PaymentReceipt {
   transactionId: string;
@@ -23,56 +24,59 @@ interface PaymentReceipt {
 }
 
 export default function App() {
-
-  // Navigation states: 'landing' | 'enroll' | 'checkout' | 'success' | 'admin'
+  // Navigation states: 'landing' | 'enroll' | 'checkout' | 'success' | 'admin' | 'vault'
   const [currentPage, setCurrentPage] = useState<string>("landing");
   const [selectedProgramId, setSelectedProgramId] = useState<string>("professional");
   
-  // Persistent data state
-  const [programs, setPrograms] = useState<Program[]>(() => {
-    const saved = localStorage.getItem("zf_programs");
-    return saved ? JSON.parse(saved) : PROGRAMS;
+  // Dynamic persistent database states
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  const [tradeResults, setTradeResults] = useState<TradeResult[]>([]);
+  const [applications, setApplications] = useState<AcademyApplication[]>([]);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [paymentGatewayEnabled, setPaymentGatewayEnabled] = useState<boolean>(false);
+
+  const [studentUser, setStudentUser] = useState<{ fullName: string; email: string } | null>(() => {
+    const saved = sessionStorage.getItem("zf_student");
+    return saved ? JSON.parse(saved) : null;
   });
 
-  const [testimonials, setTestimonials] = useState<Testimonial[]>(() => {
-    const saved = localStorage.getItem("zf_testimonials");
-    return saved ? JSON.parse(saved) : TESTIMONIALS;
-  });
-
-  const [tradeResults, setTradeResults] = useState<TradeResult[]>(() => {
-    const saved = localStorage.getItem("zf_tradeResults");
-    return saved ? JSON.parse(saved) : TRADE_RESULTS;
-  });
-
-  const [applications, setApplications] = useState<AcademyApplication[]>(() => {
-    const saved = localStorage.getItem("zf_applications");
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [webhookUrl, setWebhookUrl] = useState<string>(() => {
-    return localStorage.getItem("zf_webhookUrl") || "";
-  });
-
-  // Keep state synced to localStorage
   useEffect(() => {
-    localStorage.setItem("zf_programs", JSON.stringify(programs));
-  }, [programs]);
+    if (studentUser) {
+      sessionStorage.setItem("zf_student", JSON.stringify(studentUser));
+    } else {
+      sessionStorage.removeItem("zf_student");
+    }
+  }, [studentUser]);
 
+  // Load data from the backend database endpoints on mount
   useEffect(() => {
-    localStorage.setItem("zf_testimonials", JSON.stringify(testimonials));
-  }, [testimonials]);
-
-  useEffect(() => {
-    localStorage.setItem("zf_tradeResults", JSON.stringify(tradeResults));
-  }, [tradeResults]);
-
-  useEffect(() => {
-    localStorage.setItem("zf_applications", JSON.stringify(applications));
-  }, [applications]);
-
-  useEffect(() => {
-    localStorage.setItem("zf_webhookUrl", webhookUrl);
-  }, [webhookUrl]);
+    const loadAllData = async () => {
+      try {
+        const [progs, tests, trades, apps, settings, vids] = await Promise.all([
+          fetch("/api/programs").then(res => res.json()),
+          fetch("/api/testimonials").then(res => res.json()),
+          fetch("/api/trade-results").then(res => res.json()),
+          fetch("/api/applications").then(res => res.json()),
+          fetch("/api/settings").then(res => res.json()),
+          fetch("/api/videos").then(res => res.json())
+        ]);
+        
+        setPrograms(progs);
+        setTestimonials(tests);
+        setTradeResults(trades);
+        setApplications(apps);
+        setWebhookUrl(settings.webhookUrl || "");
+        setPaymentGatewayEnabled(settings.paymentGatewayEnabled || false);
+        setVideos(vids);
+      } catch (err) {
+        console.error("Disruption in loading platform database nodes:", err);
+      }
+    };
+    
+    loadAllData();
+  }, []);
 
   // Registration user state
   const [enrollment, setEnrollment] = useState<EnrollmentData>({
@@ -151,6 +155,7 @@ export default function App() {
                 webhookUrl={webhookUrl}
                 applications={applications}
                 setApplications={setApplications}
+                paymentGatewayEnabled={paymentGatewayEnabled}
               />
             )}
 
@@ -170,6 +175,20 @@ export default function App() {
               />
             )}
 
+            {currentPage === "vault" && (
+              studentUser ? (
+                <VideoVault
+                  videos={videos}
+                  onNavigate={setCurrentPage}
+                />
+              ) : (
+                <StudentLogin
+                  onLoginSuccess={(user) => setStudentUser(user)}
+                  onNavigate={setCurrentPage}
+                />
+              )
+            )}
+
             {currentPage === "admin" && (
               <AdminPortal
                 programs={programs}
@@ -182,6 +201,10 @@ export default function App() {
                 setApplications={setApplications}
                 webhookUrl={webhookUrl}
                 setWebhookUrl={setWebhookUrl}
+                videos={videos}
+                setVideos={setVideos}
+                paymentGatewayEnabled={paymentGatewayEnabled}
+                setPaymentGatewayEnabled={setPaymentGatewayEnabled}
                 onNavigate={setCurrentPage}
               />
             )}
@@ -191,23 +214,25 @@ export default function App() {
 
       {/* Global Footer */}
       {currentPage !== "success" && (
-        <footer className="bg-[#0e0e0e] border-t border-white/5 py-12 px-6 md:px-16 mt-auto">
+        <footer className="bg-[#0e0e0e] border-t border-white/5 py-12 px-6 md:px-16 mt-auto font-mono text-xs">
           <div className="max-w-7xl mx-auto space-y-10">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
               <div>
                 <div className="font-headline text-lg font-bold text-white tracking-tighter">
-                  <span className="gold-text-gradient">ZonziFX</span> Academy
+                  <span className="gold-text-gradient font-sans">ZonziFX</span> Academy
                 </div>
-                <p className="text-[#cfc4c5]/60 text-xs mt-1.5 max-w-sm">
+                <p className="text-[#cfc4c5]/60 text-xs mt-1.5 max-w-sm font-sans">
                   Precision instruction and custom analytics for disciplined global currency market participants.
                 </p>
               </div>
-              <div className="flex gap-8 text-xs font-mono">
-                <a href="#curriculum" className="text-[#cfc4c5]/60 hover:text-white transition-colors">Syllabus</a>
-                <a href="#results" className="text-[#cfc4c5]/60 hover:text-white transition-colors">Verified Results</a>
+              <div className="flex flex-wrap gap-8 text-xs font-mono">
+                <a href="#curriculum" onClick={() => currentPage !== "landing" && setCurrentPage("landing")} className="text-[#cfc4c5]/60 hover:text-white transition-colors cursor-pointer">Syllabus</a>
+                <a href="#results" onClick={() => currentPage !== "landing" && setCurrentPage("landing")} className="text-[#cfc4c5]/60 hover:text-white transition-colors cursor-pointer">Verified Results</a>
+                <a onClick={() => setCurrentPage("vault")} className="text-[#cfc4c5]/60 hover:text-[#e9c349] transition-colors cursor-pointer">Lectures Watchroom</a>
                 <a onClick={() => setCurrentPage("enroll")} className="text-[#cfc4c5]/60 hover:text-white transition-colors cursor-pointer">Register</a>
                 <a onClick={() => setCurrentPage("admin")} className="text-[#cfc4c5]/60 hover:text-[#e9c349] transition-colors cursor-pointer font-bold">Admin Portal</a>
-              </div>            </div>
+              </div>
+            </div>
 
             <div className="pt-8 border-t border-white/5 space-y-4">
               <p className="font-mono text-[10px] text-[#353535] leading-relaxed uppercase">
@@ -215,7 +240,7 @@ export default function App() {
               </p>
               <div className="flex flex-col sm:flex-row justify-between text-[11px] text-[#353535] gap-2">
                 <span>© 2026 ZonziFX Academy. All institutional rights reserved.</span>
-                <span>Protected by AES-256 secure cryptographic protocol headers.</span>
+                <span>Protected by AES-256 secure database sync headers.</span>
               </div>
             </div>
           </div>

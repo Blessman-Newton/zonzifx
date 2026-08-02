@@ -6,7 +6,9 @@ export interface Program {
   duration: string;
   description: string;
   features: string[];
+  status?: "active" | "soon" | "locked";
 }
+
 
 export interface EnrollmentData {
   fullName: string;
@@ -51,5 +53,15 @@ export interface AcademyApplication {
   capital: string;
   submittedAt: string;
   status: "Pending" | "Approved" | "Rejected" | "Contacted";
+  accessCode?: string;
+}
+
+export interface VideoItem {
+  id: string;
+  title: string;
+  description: string;
+  youtubeUrl: string;
+  category: string;
+  createdAt: string;
 }
 

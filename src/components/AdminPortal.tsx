@@ -14,15 +14,14 @@ import {
   X, 
   Save, 
   LogOut, 
-  RefreshCw, 
-  FileText, 
-  CheckCircle2, 
+  Video, 
+  Clock,
   AlertCircle,
-  ExternalLink,
   ChevronRight,
-  TrendingDown
+  ShieldCheck,
+  Play
 } from "lucide-react";
-import { Program, Testimonial, TradeResult, AcademyApplication } from "../types";
+import { Program, Testimonial, TradeResult, AcademyApplication, VideoItem } from "../types";
 
 interface AdminPortalProps {
   programs: Program[];
@@ -35,6 +34,10 @@ interface AdminPortalProps {
   setApplications: (apps: AcademyApplication[]) => void;
   webhookUrl: string;
   setWebhookUrl: (url: string) => void;
+  videos: VideoItem[];
+  setVideos: (videos: VideoItem[]) => void;
+  paymentGatewayEnabled: boolean;
+  setPaymentGatewayEnabled: (enabled: boolean) => void;
   onNavigate: (page: string) => void;
 }
 
@@ -49,6 +52,10 @@ export default function AdminPortal({
   setApplications,
   webhookUrl,
   setWebhookUrl,
+  videos,
+  setVideos,
+  paymentGatewayEnabled,
+  setPaymentGatewayEnabled,
   onNavigate
 }: AdminPortalProps) {
   // Login credentials state
@@ -57,11 +64,12 @@ export default function AdminPortal({
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // Tab State: 'overview' | 'applications' | 'curriculum' | 'trades' | 'testimonials' | 'settings'
+  // Tab State: 'overview' | 'applications' | 'curriculum' | 'trades' | 'testimonials' | 'videos' | 'settings'
   const [activeTab, setActiveTab] = useState<string>("overview");
 
   // Webhook settings locally edited URL
   const [tempWebhookUrl, setTempWebhookUrl] = useState(webhookUrl);
+  const [tempPaymentGatewayEnabled, setTempPaymentGatewayEnabled] = useState(paymentGatewayEnabled);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // --- CRUD Editing States ---
@@ -73,7 +81,8 @@ export default function AdminPortal({
     price: 299,
     duration: "",
     description: "",
-    features: [""]
+    features: [""],
+    status: "active"
   });
 
   const [editingTrade, setEditingTrade] = useState<TradeResult | null>(null);
@@ -94,6 +103,15 @@ export default function AdminPortal({
     avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDnbW28xe8TJetFpEMZvT3qghuTWJ0Kqy4cniK7KhtDX6hzz5jbtJb57FC7YDlhWZojz7C-FfFb6Y9mNy2C8w0uB2rVjGfk9KEZv15hXfeWfyr-HbfQo_cuskh447I4TEvTes7ldDndWMxlg3THoWi7NGstj01OIiJL74xWT8HYINtdFbDl5ZYEy7MeFNzhVuWiEHJAGmmaZvY0f4WnhH5QZyavtAE_S5-2Az2vfxMTOQFPXDyoAzWdLg",
     rating: 5,
     quote: ""
+  });
+
+  const [editingVideo, setEditingVideo] = useState<VideoItem | null>(null);
+  const [isAddingVideo, setIsAddingVideo] = useState(false);
+  const [videoForm, setVideoForm] = useState<Omit<VideoItem, "id" | "createdAt">>({
+    title: "",
+    description: "",
+    youtubeUrl: "",
+    category: "Tutorial"
   });
 
   const [appFilter, setAppFilter] = useState<string>("All");
@@ -120,32 +138,74 @@ export default function AdminPortal({
     setPassword("");
   };
 
-  // --- Application Actions ---
-  const updateAppStatus = (id: string, status: AcademyApplication["status"]) => {
-    const updated = applications.map(app => 
-      app.id === id ? { ...app, status } : app
-    );
-    setApplications(updated);
-  };
-
-  const deleteApplication = (id: string) => {
-    if (confirm("Are you sure you want to delete this applicant's record?")) {
-      setApplications(applications.filter(app => app.id !== id));
+  // --- REST HTTP CRUD Helpers ---
+  const fetchAPI = async (url: string, method: string, body?: any) => {
+    try {
+      const options: RequestInit = {
+        method,
+        headers: { "Content-Type": "application/json" }
+      };
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      if (method !== "DELETE" && response.status !== 204) {
+        return await response.json();
+      }
+      return null;
+    } catch (err) {
+      console.error(`API ${method} error for ${url}:`, err);
+      alert("Error: Database connection disrupted.");
+      throw err;
     }
   };
 
-  const clearAllApplications = () => {
-    if (confirm("🚨 WARNING: This will permanently purge all stored student enrollment applications. Continue?")) {
-      setApplications([]);
+  // --- Application Actions ---
+  const updateAppStatus = async (id: string, status: AcademyApplication["status"]) => {
+    try {
+      const updated = await fetchAPI(`/api/applications/${id}`, "PUT", { status });
+      if (updated) {
+        setApplications(applications.map(app => app.id === id ? updated : app));
+      }
+    } catch (err) {}
+  };
+
+  const deleteApplication = async (id: string) => {
+    if (confirm("Are you sure you want to delete this applicant's record?")) {
+      try {
+        await fetchAPI(`/api/applications/${id}`, "DELETE");
+        setApplications(applications.filter(app => app.id !== id));
+      } catch (err) {}
+    }
+  };
+
+  const clearAllApplications = async () => {
+    if (confirm("🚨 WARNING: This will permanently purge all stored student enrollment applications in the database. Continue?")) {
+      try {
+        await fetchAPI("/api/applications", "DELETE");
+        setApplications([]);
+      } catch (err) {}
     }
   };
 
   // --- Webhook URL Action ---
-  const handleSaveWebhook = (e: React.FormEvent) => {
+  const handleSaveWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
-    setWebhookUrl(tempWebhookUrl);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    try {
+      const settings = await fetchAPI("/api/settings", "POST", { 
+        webhookUrl: tempWebhookUrl,
+        paymentGatewayEnabled: tempPaymentGatewayEnabled
+      });
+      if (settings) {
+        setWebhookUrl(settings.webhookUrl);
+        setPaymentGatewayEnabled(settings.paymentGatewayEnabled);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      }
+    } catch (err) {}
   };
 
   // --- Program / Course Actions ---
@@ -166,23 +226,34 @@ export default function AdminPortal({
     setProgramForm(prev => ({ ...prev, features: newFeatures }));
   };
 
-  const handleAddProgramSubmit = (e: React.FormEvent) => {
+  const handleAddProgramSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newProgram: Program = {
-      ...programForm,
+    const payload: Program = {
       id: programForm.name.toLowerCase().replace(/\s+/g, "-"),
-      features: programForm.features.filter(f => f.trim() !== "")
+      name: programForm.name,
+      tagline: programForm.tagline,
+      price: programForm.price,
+      duration: programForm.duration,
+      description: programForm.description,
+      features: programForm.features.filter(f => f.trim() !== ""),
+      status: programForm.status
     };
-    setPrograms([...programs, newProgram]);
-    setIsAddingProgram(false);
-    setProgramForm({
-      name: "",
-      tagline: "",
-      price: 299,
-      duration: "",
-      description: "",
-      features: [""]
-    });
+    try {
+      const created = await fetchAPI("/api/programs", "POST", payload);
+      if (created) {
+        setPrograms([...programs, created]);
+        setIsAddingProgram(false);
+        setProgramForm({
+          name: "",
+          tagline: "",
+          price: 299,
+          duration: "",
+          description: "",
+          features: [""],
+          status: "active"
+        });
+      }
+    } catch (err) {}
   };
 
   const handleEditProgramSelect = (prog: Program) => {
@@ -193,56 +264,67 @@ export default function AdminPortal({
       price: prog.price,
       duration: prog.duration,
       description: prog.description,
-      features: prog.features.length > 0 ? prog.features : [""]
+      features: prog.features.length > 0 ? prog.features : [""],
+      status: prog.status || "active"
     });
   };
 
-  const handleEditProgramSubmit = (e: React.FormEvent) => {
+  const handleEditProgramSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProgram) return;
-    const updated: Program = {
-      ...editingProgram,
+    const payload = {
       name: programForm.name,
       tagline: programForm.tagline,
       price: programForm.price,
       duration: programForm.duration,
       description: programForm.description,
-      features: programForm.features.filter(f => f.trim() !== "")
+      features: programForm.features.filter(f => f.trim() !== ""),
+      status: programForm.status
     };
-    setPrograms(programs.map(p => p.id === editingProgram.id ? updated : p));
-    setEditingProgram(null);
-    setProgramForm({
-      name: "",
-      tagline: "",
-      price: 299,
-      duration: "",
-      description: "",
-      features: [""]
-    });
+    try {
+      const updated = await fetchAPI(`/api/programs/${editingProgram.id}`, "PUT", payload);
+      if (updated) {
+        setPrograms(programs.map(p => p.id === editingProgram.id ? updated : p));
+        setEditingProgram(null);
+        setProgramForm({
+          name: "",
+          tagline: "",
+          price: 299,
+          duration: "",
+          description: "",
+          features: [""],
+          status: "active"
+        });
+      }
+    } catch (err) {}
   };
 
-  const handleDeleteProgram = (id: string) => {
-    if (confirm("Delete this course level? This will remove it from enrollment selection.")) {
-      setPrograms(programs.filter(p => p.id !== id));
+  const handleDeleteProgram = async (id: string) => {
+    if (confirm("Delete this course level from database?")) {
+      try {
+        await fetchAPI(`/api/programs/${id}`, "DELETE");
+        setPrograms(programs.filter(p => p.id !== id));
+      } catch (err) {}
     }
   };
 
   // --- Trade Outcome Actions ---
-  const handleAddTradeSubmit = (e: React.FormEvent) => {
+  const handleAddTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newTrade: TradeResult = {
-      ...tradeForm,
-      id: `trade-${Date.now()}`
-    };
-    setTradeResults([newTrade, ...tradeResults]);
-    setIsAddingTrade(false);
-    setTradeForm({
-      pair: "",
-      profit: 500,
-      time: "Just now",
-      type: "Verified Outcome",
-      image: "https://lh3.googleusercontent.com/aida-public/AB6AXuCbk9JQStyfDlCgVwcO-405y7XHIN5JJAvPh4qlenkF58YtsX8-YPF7glUjId70hZpPUEgoOsU3vZ_tq5S2L7oZ36svSI975T3ZDPcRkJICKHZvb4qicc6cgSp8wpBax4znKIwRetMwrZoOFEv4nnNI9zQA2o6G6SeC9iUsGiHMm6Q6HPaI7LajRoTasR5QQIB8zAkztYMKmcus_2nUtkxTq0Z4gp6pgYjSUHJ-bb_kjSjYE5OTmGnjOw"
-    });
+    try {
+      const created = await fetchAPI("/api/trade-results", "POST", tradeForm);
+      if (created) {
+        setTradeResults([created, ...tradeResults]);
+        setIsAddingTrade(false);
+        setTradeForm({
+          pair: "",
+          profit: 500,
+          time: "Just now",
+          type: "Verified Outcome",
+          image: "https://lh3.googleusercontent.com/aida-public/AB6AXuCbk9JQStyfDlCgVwcO-405y7XHIN5JJAvPh4qlenkF58YtsX8-YPF7glUjId70hZpPUEgoOsU3vZ_tq5S2L7oZ36svSI975T3ZDPcRkJICKHZvb4qicc6cgSp8wpBax4znKIwRetMwrZoOFEv4nnNI9zQA2o6G6SeC9iUsGiHMm6Q6HPaI7LajRoTasR5QQIB8zAkztYMKmcus_2nUtkxTq0Z4gp6pgYjSUHJ-bb_kjSjYE5OTmGnjOw"
+        });
+      }
+    } catch (err) {}
   };
 
   const handleEditTradeSelect = (trade: TradeResult) => {
@@ -256,43 +338,44 @@ export default function AdminPortal({
     });
   };
 
-  const handleEditTradeSubmit = (e: React.FormEvent) => {
+  const handleEditTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTrade) return;
-    const updated: TradeResult = {
-      ...editingTrade,
-      pair: tradeForm.pair,
-      profit: tradeForm.profit,
-      time: tradeForm.time,
-      type: tradeForm.type,
-      image: tradeForm.image
-    };
-    setTradeResults(tradeResults.map(t => t.id === editingTrade.id ? updated : t));
-    setEditingTrade(null);
+    try {
+      const updated = await fetchAPI(`/api/trade-results/${editingTrade.id}`, "PUT", tradeForm);
+      if (updated) {
+        setTradeResults(tradeResults.map(t => t.id === editingTrade.id ? updated : t));
+        setEditingTrade(null);
+      }
+    } catch (err) {}
   };
 
-  const handleDeleteTrade = (id: string) => {
+  const handleDeleteTrade = async (id: string) => {
     if (confirm("Remove this trade outcome card?")) {
-      setTradeResults(tradeResults.filter(t => t.id !== id));
+      try {
+        await fetchAPI(`/api/trade-results/${id}`, "DELETE");
+        setTradeResults(tradeResults.filter(t => t.id !== id));
+      } catch (err) {}
     }
   };
 
   // --- Testimonial Actions ---
-  const handleAddTestimonialSubmit = (e: React.FormEvent) => {
+  const handleAddTestimonialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newTest: Testimonial = {
-      ...testimonialForm,
-      id: `test-${Date.now()}`
-    };
-    setTestimonials([newTest, ...testimonials]);
-    setIsAddingTestimonial(false);
-    setTestimonialForm({
-      name: "",
-      role: "Verified Student",
-      avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDnbW28xe8TJetFpEMZvT3qghuTWJ0Kqy4cniK7KhtDX6hzz5jbtJb57FC7YDlhWZojz7C-FfFb6Y9mNy2C8w0uB2rVjGfk9KEZv15hXfeWfyr-HbfQo_cuskh447I4TEvTes7ldDndWMxlg3THoWi7NGstj01OIiJL74xWT8HYINtdFbDl5ZYEy7MeFNzhVuWiEHJAGmmaZvY0f4WnhH5QZyavtAE_S5-2Az2vfxMTOQFPXDyoAzWdLg",
-      rating: 5,
-      quote: ""
-    });
+    try {
+      const created = await fetchAPI("/api/testimonials", "POST", testimonialForm);
+      if (created) {
+        setTestimonials([created, ...testimonials]);
+        setIsAddingTestimonial(false);
+        setTestimonialForm({
+          name: "",
+          role: "Verified Student",
+          avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDnbW28xe8TJetFpEMZvT3qghuTWJ0Kqy4cniK7KhtDX6hzz5jbtJb57FC7YDlhWZojz7C-FfFb6Y9mNy2C8w0uB2rVjGfk9KEZv15hXfeWfyr-HbfQo_cuskh447I4TEvTes7ldDndWMxlg3THoWi7NGstj01OIiJL74xWT8HYINtdFbDl5ZYEy7MeFNzhVuWiEHJAGmmaZvY0f4WnhH5QZyavtAE_S5-2Az2vfxMTOQFPXDyoAzWdLg",
+          rating: 5,
+          quote: ""
+        });
+      }
+    } catch (err) {}
   };
 
   const handleEditTestimonialSelect = (test: Testimonial) => {
@@ -306,25 +389,80 @@ export default function AdminPortal({
     });
   };
 
-  const handleEditTestimonialSubmit = (e: React.FormEvent) => {
+  const handleEditTestimonialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTestimonial) return;
-    const updated: Testimonial = {
-      ...editingTestimonial,
-      name: testimonialForm.name,
-      role: testimonialForm.role,
-      avatar: testimonialForm.avatar,
-      rating: testimonialForm.rating,
-      quote: testimonialForm.quote
-    };
-    setTestimonials(testimonials.map(t => t.id === editingTestimonial.id ? updated : t));
-    setEditingTestimonial(null);
+    try {
+      const updated = await fetchAPI(`/api/testimonials/${editingTestimonial.id}`, "PUT", testimonialForm);
+      if (updated) {
+        setTestimonials(testimonials.map(t => t.id === editingTestimonial.id ? updated : t));
+        setEditingTestimonial(null);
+      }
+    } catch (err) {}
   };
 
-  const handleDeleteTestimonial = (id: string) => {
+  const handleDeleteTestimonial = async (id: string) => {
     if (confirm("Remove this student testimonial card?")) {
-      setTestimonials(testimonials.filter(t => t.id !== id));
+      try {
+        await fetchAPI(`/api/testimonials/${id}`, "DELETE");
+        setTestimonials(testimonials.filter(t => t.id !== id));
+      } catch (err) {}
     }
+  };
+
+  // --- Video CRUD Actions ---
+  const handleAddVideoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const created = await fetchAPI("/api/videos", "POST", videoForm);
+      if (created) {
+        setVideos([created, ...videos]);
+        setIsAddingVideo(false);
+        setVideoForm({
+          title: "",
+          description: "",
+          youtubeUrl: "",
+          category: "Tutorial"
+        });
+      }
+    } catch (err) {}
+  };
+
+  const handleEditVideoSelect = (video: VideoItem) => {
+    setEditingVideo(video);
+    setVideoForm({
+      title: video.title,
+      description: video.description,
+      youtubeUrl: video.youtubeUrl,
+      category: video.category
+    });
+  };
+
+  const handleEditVideoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVideo) return;
+    try {
+      const updated = await fetchAPI(`/api/videos/${editingVideo.id}`, "PUT", videoForm);
+      if (updated) {
+        setVideos(videos.map(v => v.id === editingVideo.id ? updated : v));
+        setEditingVideo(null);
+      }
+    } catch (err) {}
+  };
+
+  const handleDeleteVideo = async (id: string) => {
+    if (confirm("Permanently delete this video lecture from the database?")) {
+      try {
+        await fetchAPI(`/api/videos/${id}`, "DELETE");
+        setVideos(videos.filter(v => v.id !== id));
+      } catch (err) {}
+    }
+  };
+
+  const getYoutubeId = (url: string) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
   };
 
   const filteredApps = appFilter === "All" 
@@ -348,7 +486,7 @@ export default function AdminPortal({
             <h2 className="font-headline text-xl font-bold text-white">
               Terminal Authorization
             </h2>
-            <p className="text-xs text-[#cfc4c5]/60 max-w-xs mx-auto">
+            <p className="text-xs text-[#cfc4c5]/60 max-w-xs mx-auto font-sans">
               Access is restricted to verified administrative credentials only.
             </p>
           </div>
@@ -361,8 +499,8 @@ export default function AdminPortal({
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Username</label>
+            <div className="space-y-1.5 font-mono">
+              <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Username</label>
               <input 
                 type="text" 
                 value={username}
@@ -373,8 +511,8 @@ export default function AdminPortal({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Passcode Key</label>
+            <div className="space-y-1.5 font-mono">
+              <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Passcode Key</label>
               <input 
                 type="password" 
                 value={password}
@@ -413,23 +551,21 @@ export default function AdminPortal({
 
   // --- MAIN ADMIN PANEL CORE ---
   return (
-    <div className="relative pt-20 min-h-screen bg-[#0c0c0c] text-white overflow-x-hidden selection:bg-[#e9c349]/30 pb-16 flex flex-col">
+    <div className="relative pt-20 min-h-screen bg-[#0c0c0c] text-white overflow-x-hidden selection:bg-[#e9c349]/30 pb-16 flex flex-col font-mono">
       {/* Admin Top Dashboard Status Bar */}
-      <div className="bg-[#131313] border-b border-white/5 px-6 md:px-16 py-3 flex flex-wrap justify-between items-center gap-4 text-xs font-mono">
+      <div className="bg-[#131313] border-b border-white/5 px-6 md:px-16 py-3 flex flex-wrap justify-between items-center gap-4 text-xs">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 text-emerald-400 font-bold">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>SECURE TERM-01 ONLINE</span>
+            <span>SECURE BACK-END SYNC TERMINAL</span>
           </div>
           <span className="text-white/20">|</span>
           <div className="text-[#cfc4c5]">
-            DB Nodes: <span className="text-white font-semibold">Active (Sync to Client state)</span>
+            Source: <span className="text-white font-bold">db/database.json</span>
           </div>
           <span className="text-white/20">|</span>
           <div className="text-[#cfc4c5]">
-            Webhook Mode: <span className={webhookUrl ? "text-[#e9c349] font-bold" : "text-[#cfc4c5]/50"}>
-              {webhookUrl ? "External Delivery Enabled" : "Local Database Storage Only"}
-            </span>
+            API Delivery: <span className="text-emerald-400 font-bold">Synchronized REST API endpoints</span>
           </div>
         </div>
 
@@ -458,7 +594,7 @@ export default function AdminPortal({
               <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-white text-xs">Operator Console</h4>
+              <h4 className="font-bold text-white text-xs font-headline">Operator Console</h4>
               <p className="text-[10px] text-[#cfc4c5]/60 font-mono">ID: SEC-ROOT-045A</p>
             </div>
           </div>
@@ -499,6 +635,15 @@ export default function AdminPortal({
               <BookOpen className="w-4 h-4 opacity-50" />
             </button>
             <button
+              onClick={() => setActiveTab("videos")}
+              className={`p-4 text-left border-b border-white/5 transition-all flex items-center justify-between cursor-pointer ${
+                activeTab === "videos" ? "bg-[#e9c349]/10 text-[#e9c349] border-l-2 border-l-[#e9c349]" : "text-[#cfc4c5] hover:bg-white/5"
+              }`}
+            >
+              <span>Video Lectures Vault</span>
+              <Video className="w-4 h-4 opacity-50" />
+            </button>
+            <button
               onClick={() => setActiveTab("trades")}
               className={`p-4 text-left border-b border-white/5 transition-all flex items-center justify-between cursor-pointer ${
                 activeTab === "trades" ? "bg-[#e9c349]/10 text-[#e9c349] border-l-2 border-l-[#e9c349]" : "text-[#cfc4c5] hover:bg-white/5"
@@ -537,31 +682,36 @@ export default function AdminPortal({
               <div>
                 <h2 className="font-headline text-2xl font-bold text-white mb-2">Dashboard Overview</h2>
                 <p className="text-xs text-[#cfc4c5] leading-relaxed">
-                  Real-time analytics and telemetry tracking core platform parameters. System updates instantly cascade onto user interfaces.
+                  Real-time database operations panel. All uploads, deletions, and course edits modify `db/database.json` dynamically and update the platform.
                 </p>
               </div>
 
               {/* Statistics Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-5 bg-black rounded border border-white/5 text-center">
-                  <BookOpen className="w-5 h-5 text-[#e9c349] mx-auto mb-2" />
-                  <span className="text-[10px] font-mono text-[#cfc4c5]/60 uppercase tracking-wider block">Active Courses</span>
-                  <span className="text-2xl font-headline font-bold text-white">{programs.length}</span>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="p-4 bg-black rounded border border-white/5 text-center">
+                  <BookOpen className="w-4 h-4 text-[#e9c349] mx-auto mb-2" />
+                  <span className="text-[9px] text-[#cfc4c5]/60 uppercase tracking-wider block">Courses</span>
+                  <span className="text-xl font-headline font-bold text-white">{programs.length}</span>
                 </div>
-                <div className="p-5 bg-black rounded border border-white/5 text-center">
-                  <TrendingUp className="w-5 h-5 text-[#e9c349] mx-auto mb-2" />
-                  <span className="text-[10px] font-mono text-[#cfc4c5]/60 uppercase tracking-wider block">Verified Trades</span>
-                  <span className="text-2xl font-headline font-bold text-white">{tradeResults.length}</span>
+                <div className="p-4 bg-black rounded border border-white/5 text-center">
+                  <Video className="w-4 h-4 text-[#e9c349] mx-auto mb-2" />
+                  <span className="text-[9px] text-[#cfc4c5]/60 uppercase tracking-wider block">Videos</span>
+                  <span className="text-xl font-headline font-bold text-white">{videos.length}</span>
                 </div>
-                <div className="p-5 bg-black rounded border border-white/5 text-center">
-                  <MessageSquare className="w-5 h-5 text-[#e9c349] mx-auto mb-2" />
-                  <span className="text-[10px] font-mono text-[#cfc4c5]/60 uppercase tracking-wider block">Testimonials</span>
-                  <span className="text-2xl font-headline font-bold text-white">{testimonials.length}</span>
+                <div className="p-4 bg-black rounded border border-white/5 text-center">
+                  <TrendingUp className="w-4 h-4 text-[#e9c349] mx-auto mb-2" />
+                  <span className="text-[9px] text-[#cfc4c5]/60 uppercase tracking-wider block">Trades</span>
+                  <span className="text-xl font-headline font-bold text-white">{tradeResults.length}</span>
                 </div>
-                <div className="p-5 bg-black rounded border border-white/5 text-center">
-                  <Users className="w-5 h-5 text-[#e9c349] mx-auto mb-2" />
-                  <span className="text-[10px] font-mono text-[#cfc4c5]/60 uppercase tracking-wider block">Form Inquiries</span>
-                  <span className="text-2xl font-headline font-bold text-white">{applications.length}</span>
+                <div className="p-4 bg-black rounded border border-white/5 text-center">
+                  <MessageSquare className="w-4 h-4 text-[#e9c349] mx-auto mb-2" />
+                  <span className="text-[9px] text-[#cfc4c5]/60 uppercase tracking-wider block">Reviews</span>
+                  <span className="text-xl font-headline font-bold text-white">{testimonials.length}</span>
+                </div>
+                <div className="p-4 bg-black rounded border border-white/5 text-center col-span-2 md:col-span-1">
+                  <Users className="w-4 h-4 text-[#e9c349] mx-auto mb-2" />
+                  <span className="text-[9px] text-[#cfc4c5]/60 uppercase tracking-wider block">Applicants</span>
+                  <span className="text-xl font-headline font-bold text-white">{applications.length}</span>
                 </div>
               </div>
 
@@ -594,13 +744,22 @@ export default function AdminPortal({
                 </div>
 
                 <div className="p-5 bg-[#131313] border border-white/5 rounded-lg space-y-4">
-                  <h3 className="font-headline font-bold text-xs uppercase tracking-wider text-[#e9c349]">Administrative Operations</h3>
-                  <div className="space-y-2 text-xs font-mono text-[#cfc4c5] leading-relaxed">
-                    <p>✔️ All client revisions automatically cache in state.</p>
-                    <p>✔️ Edit verified outcomes slider instantly from this terminal.</p>
-                    <p>✔️ Update program duration tags or course module pricing instantly.</p>
-                    <p>✔️ Connect Formspree to route applicant alerts to your email.</p>
-                  </div>
+                  <h3 className="font-headline font-bold text-xs uppercase tracking-wider text-[#e9c349]">Recent Video Uploads</h3>
+                  {videos.length === 0 ? (
+                    <p className="text-xs text-[#cfc4c5]/60 font-mono py-4">No videos found.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-48 overflow-y-auto font-sans">
+                      {videos.slice(0, 4).map((vid) => (
+                        <div key={vid.id} className="flex justify-between items-center text-xs p-2.5 bg-black/40 rounded border border-white/5">
+                          <div className="truncate pr-4">
+                            <p className="font-bold text-white truncate">{vid.title}</p>
+                            <p className="text-[9px] text-[#cfc4c5]/60 font-mono">{vid.category}</p>
+                          </div>
+                          <span className="text-[9px] font-mono text-[#cfc4c5]/50 flex-shrink-0">{vid.createdAt}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -645,10 +804,10 @@ export default function AdminPortal({
                 <div className="border border-dashed border-white/10 p-12 text-center rounded-xl">
                   <Users className="w-10 h-10 text-[#cfc4c5]/30 mx-auto mb-3" />
                   <p className="text-sm text-[#cfc4c5]">No applications found matching filtering rules.</p>
-                  <p className="text-xs text-[#cfc4c5]/60 mt-1">Submit inquiries through &quot;Join Academy&quot; screen to populate dashboard nodes.</p>
+                  <p className="text-xs text-[#cfc4c5]/60 mt-1">Submit inquiries through &quot;Join Academy&quot; screen to populate database nodes.</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto border border-white/5 rounded-lg">
+                <div className="overflow-x-auto border border-white/5 rounded-lg font-sans">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-black font-mono text-[#cfc4c5]/70 border-b border-white/10">
@@ -656,11 +815,12 @@ export default function AdminPortal({
                         <th className="p-4">Applicant Detail</th>
                         <th className="p-4">Desired Level</th>
                         <th className="p-4">Risk Profile / Capital</th>
+                        <th className="p-4">Access Code</th>
                         <th className="p-4">Status Node</th>
                         <th className="p-4 text-right">Operations</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5 font-sans">
+                    <tbody className="divide-y divide-white/5">
                       {filteredApps.map((app) => (
                         <tr key={app.id} className="hover:bg-white/[0.02]">
                           <td className="p-4 font-mono text-[10px] text-[#cfc4c5]/70">
@@ -677,8 +837,11 @@ export default function AdminPortal({
                             </span>
                           </td>
                           <td className="p-4">
-                            <p className="text-white"><span className="text-white/40">Exp:</span> {app.experience}</p>
-                            <p className="text-white font-mono"><span className="text-white/40">Cap:</span> {app.capital}</p>
+                            <p className="text-white"><span className="text-white/40 font-bold">Exp:</span> {app.experience}</p>
+                            <p className="text-white font-mono"><span className="text-white/40 font-bold">Cap:</span> {app.capital}</p>
+                          </td>
+                          <td className="p-4 font-mono text-[#e9c349] font-bold text-xs select-all">
+                            {app.accessCode || "ZF-PEND"}
                           </td>
                           <td className="p-4">
                             <span className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider font-bold ${
@@ -690,22 +853,22 @@ export default function AdminPortal({
                               {app.status}
                             </span>
                           </td>
-                          <td className="p-4 text-right space-y-1 sm:space-y-0 sm:space-x-1.5 whitespace-nowrap">
+                          <td className="p-4 text-right space-y-1 sm:space-y-0 sm:space-x-1.5 whitespace-nowrap font-mono">
                             <button
                               onClick={() => updateAppStatus(app.id, "Approved")}
-                              className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 rounded text-[9px] font-mono cursor-pointer"
+                              className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 rounded text-[9px] cursor-pointer"
                             >
                               Approve
                             </button>
                             <button
                               onClick={() => updateAppStatus(app.id, "Contacted")}
-                              className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/25 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 rounded text-[9px] font-mono cursor-pointer"
+                              className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/25 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 rounded text-[9px] cursor-pointer"
                             >
                               Contact
                             </button>
                             <button
                               onClick={() => updateAppStatus(app.id, "Rejected")}
-                              className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 rounded text-[9px] font-mono cursor-pointer"
+                              className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 rounded text-[9px] cursor-pointer"
                             >
                               Reject
                             </button>
@@ -742,7 +905,7 @@ export default function AdminPortal({
                       setIsAddingProgram(true);
                       setEditingProgram(null);
                     }}
-                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap animate-none"
                   >
                     <Plus className="w-4 h-4" /> Add Level
                   </button>
@@ -773,7 +936,7 @@ export default function AdminPortal({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Level Name</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Level Name</label>
                       <input 
                         type="text" 
                         value={programForm.name}
@@ -785,7 +948,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Tagline / Subheader</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Tagline / Subheader</label>
                       <input 
                         type="text" 
                         value={programForm.tagline}
@@ -797,21 +960,22 @@ export default function AdminPortal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Tuition Price ($ USD)</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Tuition Price ($ USD)</label>
                       <input 
                         type="number" 
+                        step="0.01"
                         value={programForm.price}
-                        onChange={(e) => setProgramForm({ ...programForm, price: parseInt(e.target.value) || 0 })}
-                        placeholder="e.g., 599" 
+                        onChange={(e) => setProgramForm({ ...programForm, price: parseFloat(e.target.value) || 0 })}
+                        placeholder="e.g., 599.99" 
                         className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs focus:border-[#e9c349] focus:outline-none"
                         required
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Duration</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Duration</label>
                       <input 
                         type="text" 
                         value={programForm.duration}
@@ -823,34 +987,48 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Syllabus (Mock Document)</label>
-                      <div className="w-full bg-[#0e0e0e] border border-white/10 p-2 rounded text-[#cfc4c5] text-xs flex justify-between items-center">
-                        <span className="font-mono text-[10px] truncate">📄 Level_Syllabus_Package.pdf</span>
-                        <span className="text-[9px] text-[#e9c349] font-bold">Uploaded</span>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Level Status</label>
+                      <select 
+                        value={programForm.status}
+                        onChange={(e) => setProgramForm({ ...programForm, status: e.target.value as any })}
+                        className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs focus:border-[#e9c349] focus:outline-none"
+                        required
+                      >
+                        <option value="active">Active (Open to Enroll)</option>
+                        <option value="soon">Soon to Come (Locked)</option>
+                        <option value="locked">Locked for Now (Locked)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Syllabus (Mock)</label>
+                      <div className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-[#cfc4c5] text-xs flex justify-between items-center h-[34px]">
+                        <span className="truncate">📄 Syllabus_Class.pdf</span>
+                        <span className="text-[8px] text-[#e9c349] font-bold">Loaded</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Course Core Description</label>
+                    <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Course Core Description</label>
                     <textarea 
                       value={programForm.description}
                       onChange={(e) => setProgramForm({ ...programForm, description: e.target.value })}
                       placeholder="Identify complex structural volatility anomalies and executing delta-neutral trades..."
-                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs h-20 focus:border-[#e9c349] focus:outline-none resize-none"
+                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs h-20 focus:border-[#e9c349] focus:outline-none resize-none font-sans"
                       required
                     />
                   </div>
 
                   {/* Dynamic Features List input */}
                   <div className="space-y-2">
-                    <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">
+                    <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">
                       Syllabus Modules / Key Features List
                     </label>
                     
                     <div className="space-y-2 font-sans">
                       {programForm.features.map((feature, fIdx) => (
-                        <div key={fIdx} className="flex gap-2 items-center font-sans">
+                        <div key={fIdx} className="flex gap-2 items-center">
                           <input 
                             type="text" 
                             value={feature}
@@ -908,16 +1086,23 @@ export default function AdminPortal({
                     <div className="space-y-2">
                       <div className="flex justify-between items-start gap-4">
                         <div>
-                          <span className="text-[10px] font-mono text-[#e9c349] font-bold">LEVEL 0{idx + 1}</span>
-                          <h4 className="font-headline font-bold text-white text-sm mt-0.5">{prog.name}</h4>
-                          <p className="text-[10px] text-[#cfc4c5]/60 italic">{prog.tagline}</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-[#e9c349] font-bold">LEVEL 0{idx + 1}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                              prog.status === "active" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                            }`}>
+                              {prog.status || "active"}
+                            </span>
+                          </div>
+                          <h4 className="font-headline font-bold text-white text-sm mt-1">{prog.name}</h4>
+                          <p className="text-[10px] text-[#cfc4c5]/60 italic font-sans">{prog.tagline}</p>
                         </div>
                         <span className="text-[#e9c349] font-mono text-xs font-bold">${prog.price}</span>
                       </div>
-                      <p className="text-xs text-[#cfc4c5] line-clamp-3 leading-relaxed">{prog.description}</p>
+                      <p className="text-xs text-[#cfc4c5] line-clamp-3 leading-relaxed font-sans">{prog.description}</p>
                       
                       <div className="pt-2 border-t border-white/5">
-                        <span className="text-[9px] font-mono text-[#cfc4c5]/40 uppercase tracking-widest block mb-1">Outline:</span>
+                        <span className="text-[9px] text-[#cfc4c5]/40 uppercase tracking-widest block mb-1">Outline:</span>
                         <ul className="text-[10px] text-[#cfc4c5]/75 space-y-1 font-sans">
                           {prog.features.slice(0, 3).map((feat, fIdx) => (
                             <li key={fIdx} className="truncate">• {feat}</li>
@@ -930,11 +1115,11 @@ export default function AdminPortal({
                     </div>
 
                     <div className="flex justify-between items-center pt-2 border-t border-white/5">
-                      <span className="bg-white/5 border border-white/10 px-2 py-0.5 text-[9px] font-mono rounded text-[#cfc4c5]">
+                      <span className="bg-white/5 border border-white/10 px-2 py-0.5 text-[9px] rounded text-[#cfc4c5]">
                         {prog.duration}
                       </span>
                       
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 font-mono">
                         <button
                           onClick={() => handleEditProgramSelect(prog)}
                           className="bg-[#e9c349]/10 hover:bg-[#e9c349]/20 border border-[#e9c349]/20 hover:border-[#e9c349]/40 text-[#e9c349] px-2.5 py-1 text-[10px] rounded flex items-center gap-1 cursor-pointer transition-colors"
@@ -956,7 +1141,182 @@ export default function AdminPortal({
             </div>
           )}
 
-          {/* TAB 4: VERIFIED TRADE OUTCOMES */}
+          {/* TAB 4: VIDEOS VAULT MANAGEMENT */}
+          {activeTab === "videos" && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="font-headline text-2xl font-bold text-white mb-2">Video Lectures Library</h2>
+                  <p className="text-xs text-[#cfc4c5] leading-relaxed">
+                    Add YouTube lecture references that play embedded directly in the student watchroom vault.
+                  </p>
+                </div>
+                
+                {!isAddingVideo && !editingVideo && (
+                  <button
+                    onClick={() => {
+                      setIsAddingVideo(true);
+                      setEditingVideo(null);
+                    }}
+                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap animate-none"
+                  >
+                    <Plus className="w-4 h-4" /> Add Lecture
+                  </button>
+                )}
+              </div>
+
+              {/* Form to Add or Edit Video */}
+              {(isAddingVideo || editingVideo) && (
+                <form 
+                  onSubmit={isAddingVideo ? handleAddVideoSubmit : handleEditVideoSubmit}
+                  className="bg-black/60 p-6 rounded-xl border border-white/10 space-y-4"
+                >
+                  <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                    <h3 className="font-headline font-bold text-sm text-[#e9c349]">
+                      {isAddingVideo ? "Add New Video Lecture" : `Edit Video ID: ${editingVideo?.id}`}
+                    </h3>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setIsAddingVideo(false);
+                        setEditingVideo(null);
+                      }}
+                      className="text-xs text-white/50 hover:text-white cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Lecture Title</label>
+                      <input 
+                        type="text" 
+                        value={videoForm.title}
+                        onChange={(e) => setVideoForm({ ...videoForm, title: e.target.value })}
+                        placeholder="e.g., Session Sweeps and Stop Hunt Targets" 
+                        className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs focus:border-[#e9c349] focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Video Category</label>
+                      <select 
+                        value={videoForm.category}
+                        onChange={(e) => setVideoForm({ ...videoForm, category: e.target.value })}
+                        className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs focus:border-[#e9c349] focus:outline-none"
+                        required
+                      >
+                        <option value="Tutorial">Tutorial</option>
+                        <option value="Market Review">Market Review</option>
+                        <option value="Webinar">Webinar</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">YouTube Video URL / Embed link</label>
+                    <input 
+                      type="url" 
+                      value={videoForm.youtubeUrl}
+                      onChange={(e) => setVideoForm({ ...videoForm, youtubeUrl: e.target.value })}
+                      placeholder="e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ" 
+                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs focus:border-[#e9c349] focus:outline-none"
+                      required
+                    />
+                    <p className="text-[9px] text-[#cfc4c5]/40">
+                      Supports: standard watch links, share links, or embed links.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Video Lecture Description</label>
+                    <textarea 
+                      value={videoForm.description}
+                      onChange={(e) => setVideoForm({ ...videoForm, description: e.target.value })}
+                      placeholder="Provide structured details of what this video lecture covers..."
+                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs h-20 focus:border-[#e9c349] focus:outline-none resize-none font-sans"
+                      required
+                    />
+                  </div>
+
+                  <div className="pt-2 flex justify-end gap-2">
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setIsAddingVideo(false);
+                        setEditingVideo(null);
+                      }}
+                      className="bg-white/5 hover:bg-white/10 text-white text-xs px-4 py-2 rounded cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="gold-gradient text-black font-headline text-xs px-6 py-2 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" /> Save Lecture Reference
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Videos Listing Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {videos.map((vid) => (
+                  <div key={vid.id} className="p-4 bg-black/40 border border-white/5 rounded-lg flex flex-col justify-between gap-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[8px] font-bold text-[#e9c349] uppercase tracking-wider">
+                            {vid.category}
+                          </span>
+                          <h4 className="font-headline font-bold text-white text-sm mt-1.5 leading-snug">{vid.title}</h4>
+                        </div>
+                        {getYoutubeId(vid.youtubeUrl) ? (
+                          <span className="text-emerald-400 text-[9px] font-bold bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">Synced</span>
+                        ) : (
+                          <span className="text-rose-400 text-[9px] font-bold bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">URL Error</span>
+                        )}
+                      </div>
+                      
+                      <p className="text-xs text-[#cfc4c5] line-clamp-2 leading-relaxed font-sans">{vid.description}</p>
+                      
+                      <div className="p-2 bg-black rounded border border-white/5 font-mono text-[9px] text-[#cfc4c5]/60 truncate">
+                        URL: {vid.youtubeUrl}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-white/5 text-[10px] font-mono text-[#cfc4c5]/60">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" /> {vid.createdAt}
+                      </span>
+                      
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEditVideoSelect(vid)}
+                          className="bg-white/5 hover:bg-white/10 p-1.5 rounded cursor-pointer text-[#cfc4c5] hover:text-white"
+                          title="Edit Lecture Details"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteVideo(vid.id)}
+                          className="bg-rose-500/10 hover:bg-rose-500/20 p-1.5 rounded cursor-pointer text-rose-400"
+                          title="Delete Lecture"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: VERIFIED TRADE OUTCOMES */}
           {activeTab === "trades" && (
             <div className="space-y-6 animate-fadeIn">
               <div className="flex justify-between items-center">
@@ -973,7 +1333,7 @@ export default function AdminPortal({
                       setIsAddingTrade(true);
                       setEditingTrade(null);
                     }}
-                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap animate-none"
                   >
                     <Plus className="w-4 h-4" /> Add Outcome
                   </button>
@@ -1004,7 +1364,7 @@ export default function AdminPortal({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Instrument Pair</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Instrument Pair</label>
                       <input 
                         type="text" 
                         value={tradeForm.pair}
@@ -1016,7 +1376,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Profit Secured ($ USD)</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Profit Secured ($ USD)</label>
                       <input 
                         type="number" 
                         step="0.01"
@@ -1031,7 +1391,7 @@ export default function AdminPortal({
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Time Slot Label</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Time Slot Label</label>
                       <input 
                         type="text" 
                         value={tradeForm.time}
@@ -1043,7 +1403,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Outcome Type</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Outcome Type</label>
                       <input 
                         type="text" 
                         value={tradeForm.type}
@@ -1055,7 +1415,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Chart Screenshot URL</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Chart Screenshot URL</label>
                       <select 
                         value={tradeForm.image}
                         onChange={(e) => setTradeForm({ ...tradeForm, image: e.target.value })}
@@ -1135,7 +1495,7 @@ export default function AdminPortal({
             </div>
           )}
 
-          {/* TAB 5: TESTIMONIALS */}
+          {/* TAB 6: TESTIMONIALS */}
           {activeTab === "testimonials" && (
             <div className="space-y-6 animate-fadeIn">
               <div className="flex justify-between items-center">
@@ -1152,7 +1512,7 @@ export default function AdminPortal({
                       setIsAddingTestimonial(true);
                       setEditingTestimonial(null);
                     }}
-                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="gold-gradient text-black font-headline text-xs px-4 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap animate-none"
                   >
                     <Plus className="w-4 h-4" /> Add Testimonial
                   </button>
@@ -1183,7 +1543,7 @@ export default function AdminPortal({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Student Name</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Student Name</label>
                       <input 
                         type="text" 
                         value={testimonialForm.name}
@@ -1195,7 +1555,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Role / Title</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Role / Title</label>
                       <input 
                         type="text" 
                         value={testimonialForm.role}
@@ -1209,7 +1569,7 @@ export default function AdminPortal({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Rating (Stars)</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Rating (Stars)</label>
                       <select 
                         value={testimonialForm.rating}
                         onChange={(e) => setTestimonialForm({ ...testimonialForm, rating: parseInt(e.target.value) || 5 })}
@@ -1223,7 +1583,7 @@ export default function AdminPortal({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Avatar Image Presets</label>
+                      <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Avatar Image Presets</label>
                       <select 
                         value={testimonialForm.avatar}
                         onChange={(e) => setTestimonialForm({ ...testimonialForm, avatar: e.target.value })}
@@ -1238,12 +1598,12 @@ export default function AdminPortal({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block font-mono text-[9px] uppercase tracking-wider text-[#cfc4c5]">Student Quote</label>
+                    <label className="block text-[9px] uppercase tracking-wider text-[#cfc4c5]">Student Quote</label>
                     <textarea 
                       value={testimonialForm.quote}
                       onChange={(e) => setTestimonialForm({ ...testimonialForm, quote: e.target.value })}
                       placeholder="The training curriculum completely altered how I analyze daily liquidity swept zones..."
-                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs h-24 focus:border-[#e9c349] focus:outline-none resize-none"
+                      className="w-full bg-[#0e0e0e] border border-white/10 p-2.5 rounded text-white text-xs h-24 focus:border-[#e9c349] focus:outline-none resize-none font-sans"
                       required
                     />
                   </div>
@@ -1280,13 +1640,13 @@ export default function AdminPortal({
                         ))}
                       </div>
                       
-                      <p className="text-xs text-[#cfc4c5] italic leading-relaxed">
+                      <p className="text-xs text-[#cfc4c5] italic leading-relaxed font-sans">
                         &quot;{test.quote}&quot;
                       </p>
                     </div>
 
-                    <div className="flex justify-between items-center pt-3 border-t border-white/5">
-                      <div className="flex items-center gap-3">
+                    <div className="flex justify-between items-center pt-3 border-t border-white/5 font-mono">
+                      <div className="flex items-center gap-3 font-sans">
                         <img src={test.avatar} alt={test.name} className="w-8 h-8 rounded-full bg-neutral-800 object-cover animate-none" />
                         <div>
                           <h4 className="font-bold text-white text-xs">{test.name}</h4>
@@ -1318,7 +1678,7 @@ export default function AdminPortal({
             </div>
           )}
 
-          {/* TAB 6: FORM ROUTING / WEBHOOK SETTINGS */}
+          {/* TAB 7: FORM ROUTING / WEBHOOK SETTINGS */}
           {activeTab === "settings" && (
             <div className="space-y-6 animate-fadeIn">
               <div>
@@ -1331,13 +1691,13 @@ export default function AdminPortal({
               <form onSubmit={handleSaveWebhook} className="bg-black/60 p-6 rounded-xl border border-white/10 space-y-6">
                 {saveSuccess && (
                   <div className="p-3.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded text-xs font-mono flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                    <span>Configuration successfully integrated and updated. All new submissions will sync here.</span>
+                    <ShieldCheck className="w-5 h-5 flex-shrink-0" />
+                    <span>Configuration successfully integrated and updated. All settings are active.</span>
                   </div>
                 )}
 
                 <div className="space-y-2">
-                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[#cfc4c5]">
+                  <label className="block text-[10px] uppercase tracking-wider text-[#cfc4c5]">
                     External Forms Webhook Endpoint
                   </label>
                   <input 
@@ -1350,6 +1710,33 @@ export default function AdminPortal({
                   <p className="text-[10px] text-[#cfc4c5]/50 leading-relaxed font-sans">
                     💡 **Compatible with:** Formspree, Make, Zapier, Google Sheets webhooks, Slack incoming webhooks, or any custom API that accepts JSON POST requests. Leave empty to use local database caching only.
                   </p>
+                </div>
+
+                <div className="space-y-2 border-t border-white/5 pt-4">
+                  <label className="block text-[10px] uppercase tracking-wider text-[#cfc4c5]">
+                    Payment Gateway Routing (Tuition Checkout page)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setTempPaymentGatewayEnabled(!tempPaymentGatewayEnabled)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer focus:outline-none ${
+                        tempPaymentGatewayEnabled ? "bg-[#e9c349]" : "bg-neutral-800"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-black transition-transform ${
+                          tempPaymentGatewayEnabled ? "translate-x-6" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs font-mono font-bold text-white">
+                      {tempPaymentGatewayEnabled 
+                        ? "ACTIVE (Students will route to Checkout payment page)" 
+                        : "DISABLED (Students see a custom modal; mentors coordinate payment directly)"
+                      }
+                    </span>
+                  </div>
                 </div>
 
                 <div className="p-4 bg-[#1b1b1b] rounded border border-white/5 space-y-3 text-xs">

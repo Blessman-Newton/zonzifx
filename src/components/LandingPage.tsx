@@ -114,11 +114,11 @@ export default function LandingPage({ onNavigate, onSelectProgram, programs, tes
 
             <div className="flex items-center gap-8 pt-10 border-t border-white/5">
               <div>
-                <div className="text-[#e9c349] font-headline text-2xl font-bold">12K+</div>
-                <div className="text-[#cfc4c5] text-xs font-mono uppercase tracking-wider">Active Students</div>
+                <div className="text-[#e9c349] font-headline text-2xl font-bold">100+</div>
+                <div className="text-[#cfc4c5] text-xs font-mono uppercase tracking-wider">Active Users</div>
               </div>
               <div>
-                <div className="text-[#e9c349] font-headline text-2xl font-bold">94%</div>
+                <div className="text-[#e9c349] font-headline text-2xl font-bold">80%</div>
                 <div className="text-[#cfc4c5] text-xs font-mono uppercase tracking-wider">Success Rate</div>
               </div>
               <div>
@@ -471,12 +471,20 @@ export default function LandingPage({ onNavigate, onSelectProgram, programs, tes
                       <div>
                         <h4 className="font-headline text-lg font-bold text-white flex items-center gap-2">
                           {program.name}
+                          {program.status && program.status !== "active" && (
+                            <span className="px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                              {program.status === "soon" ? "Soon to Come" : "Locked"}
+                            </span>
+                          )}
                         </h4>
                         <p className="text-xs text-[#cfc4c5]">{program.tagline}</p>
                       </div>
                     </div>
                     
                     <div className="flex items-center gap-4 self-end md:self-auto">
+                      <span className="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-[#e9c349]/10 text-[#e9c349] border border-[#e9c349]/20">
+                        ${program.price}
+                      </span>
                       <span className={`px-2.5 py-1 rounded text-[10px] font-mono uppercase tracking-wider font-bold ${
                         isExpanded ? "bg-[#e9c349]/20 text-[#e9c349]" : "bg-[#2a2a2a] text-[#cfc4c5]"
                       }`}>
@@ -509,15 +517,21 @@ export default function LandingPage({ onNavigate, onSelectProgram, programs, tes
                             ))}
                           </div>
                           <div className="mt-8 flex justify-end">
-                            <button
-                              onClick={() => {
-                                onSelectProgram(program.id);
-                                onNavigate("enroll");
-                              }}
-                              className="gold-gradient text-black font-headline text-xs px-5 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
-                            >
-                              Enroll in this Level <ArrowRight className="w-3.5 h-3.5" />
-                            </button>
+                            {program.status === "active" || !program.status ? (
+                              <button
+                                onClick={() => {
+                                  onSelectProgram(program.id);
+                                  onNavigate("enroll");
+                                }}
+                                className="gold-gradient text-black font-headline text-xs px-5 py-2.5 rounded font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+                              >
+                                Enroll in this Level <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <div className="px-4 py-2 rounded bg-white/5 border border-white/10 text-white/40 text-xs font-headline font-bold flex items-center gap-2 select-none">
+                                🔒 {program.status === "soon" ? "Soon to Come" : "Locked for Now"}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
